@@ -99,6 +99,7 @@ fi
 
 cat <<EOF >/etc/ntp.conf
 driftfile /var/lib/ntp/ntp.drift
+statsdir /var/log/ntpstats/
 statistics loopstats peerstats clockstats
 filegen loopstats file loopstats type day enable
 filegen peerstats file peerstats type day enable
