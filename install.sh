@@ -6,33 +6,45 @@
 
 # CONFIG VALUES - Change these for your local network preference
 # Bandwidth values in kbits per second
+HOSTURL="`hostname -f`"
+FIREWALLSH="/usr/local/sbin/firewall-$HOSTURL.sh"
+
+SECUREDOMAIN="lan.thelifeofkenneth.com"
+GUESTDOMAIN="guest.thelifeofkenneth.com"
+
 UPLINKIF="em1"
 UPLINKBW="100"
 DOWNLINKIF="ifb0"
 DOWNLINKBW="100"
 
-SECURESUBNET="10.44.0.0/21"
-GUESTSUBNET="10.44.8.0/21"
+ENTIRESUBNET="10.42.0.0/20"
+SECURESUBNET="10.42.0.0/21"
+GUESTSUBNET="10.42.8.0/21"
 
 LANIP="10.42.1.1"
 LANNET="10.42.1.0/24"
 LANIF="em0"
+LANDHCP="10.42.1.100,10.42.1.199,24h"
 
-WIFIIP="10.44.2.1"
-WIFINET="10.44.2.0/24"
+WIFIIP="10.42.2.1"
+WIFINET="10.42.2.0/24"
 WIFIIF="$LANIF.2"
+WIFIDHCP="10.42.2.100,10.42.2.199,24h"
 
-WIFI5IP="10.44.3.1"
-WIFI5NET="10.44.3.0/24"
+WIFI5IP="10.42.3.1"
+WIFI5NET="10.42.3.0/24"
 WIFI5IF="$LANIF.3"
+WIFI5DHCP="10.42.3.100,10.42.3.199,24h"
 
-WIFIGUESTIP="10.44.8.1"
-WIFIGUESTNET="10.44.8.0/24"
+WIFIGUESTIP="10.42.8.1"
+WIFIGUESTNET="10.42.8.0/24"
 WIFIGUESTIF="$LANIF.8"
+WIFIGUESTDHCP="10.42.8.100,10.42.8.199,24h"
 
-WIFIGUEST5IP="10.44.9.1"
-WIFIGUEST5NET="10.44.9.0/24"
+WIFIGUEST5IP="10.42.9.1"
+WIFIGUEST5NET="10.42.9.0/24"
 WIFIGUEST5IF="$LANIF.9"
+WIFIGUEST5DHCP="10.42.9.100,10.42.9.199,24h"
 
 if [[ $EUID -ne 0 ]]; then
    echo "This script must be run as root" 1>&2
@@ -42,7 +54,7 @@ fi
 apt-get update
 apt-get install -y apache2 aptitude atop avahi-daemon avahi-utils \
 	bridge-utils build-essential dnsmasq dstat iperf \
-	minicom mutt nmap ntp pimd postfix \
+	lm-sensors minicom mutt nmap ntp pimd postfix \
 	samba screen snmp snmp-mibs-downloader snmpd ssh \
 	vim vlan
 
@@ -61,6 +73,7 @@ auto $LANIF
 iface $LANIF inet static
 	address $LANIP
 	netmask 255.255.255.0
+	up	$FIREWALLSH
 
 auto $WIFIIF
 iface $WIFIIF inet static
@@ -118,6 +131,125 @@ restrict ::1
 broadcast 239.192.6.87 ttl 7
 disable auth
 multicastclient 239.192.6.87 iburst
+EOF
+
+
+# Configure iptables firewall and forwarding
+
+cat <<EOF >/etc/sysctl.d/60-enable-ip-forwarding.conf
+net.ipv4.ip_forward=1
+net.ipv6.conf.all.forwarding=1
+EOF
+
+cat <<EOF >$FIREWALLSH
+iptables -P INPUT ACCEPT
+iptables -P OUTPUT ACCEPT
+iptables -P FORWARD ACCEPT
+# Flush everything
+iptables -F -t nat
+iptables -F -t mangle
+iptables -F -t filter
+iptables -X -t nat
+iptables -X -t mangle
+iptables -X -t filter
+
+# NAT rule for IPv4
+iptables -t nat -A POSTROUTING -s $ENTIRESUBNET -o $UPLINKIF -j MASQUERADE
+
+# Port forwards for internal hosts
+
+# Uplink exceptions and block
+iptables -A INPUT -i $UPLINKIF -m state --state ESTABLISHED,RELATED -j ACCEPT
+# Allow SSH
+iptables -A INPUT -i $UPLINKIF -p tcp --dport 22 -j ACCEPT
+# Allow SMTP
+iptables -A INPUT -i $UPLINKIF -p tcp --dport 25 -j ACCEPT
+# Allow DNS
+iptables -A INPUT -i $UPLINKIF -p tcp --dport 53 -j ACCEPT
+iptables -A INPUT -i $UPLINKIF -p udp --dport 53 -j ACCEPT
+# Allow HTTP
+iptables -A INPUT -i $UPLINKIF -p tcp --dport 80 -j ACCEPT
+
+iptables -A INPUT -i $UPLINKIF -p tcp -j DROP
+iptables -A INPUT -i $UPLINKIF -p udp -j DROP
+
+
+# Allow exceptions to DMZ
+iptables -A FORWARD -s $GUESTSUBNET -d $SECURESUBNET -m state \
+			--state ESTABLISHED,RELATED -j ACCEPT
+iptables -A FORWARD -s $GUESTSUBNET -d $SECURESUBNET -p tcp --dport 22 -j ACCEPT
+
+iptables -A FORWARD -s $GUESTSUBNET -d $SECURESUBNET -j DROP
+
+
+# QoS Upload Enforcement
+#iptables -t mangle -N QOS_OUT
+#iptables -t mangle -A POSTROUTING -o $UPLINK -j QOS_OUT
+
+# QoS Download Enforcement
+#modprobe ifb
+#ifconfig $DOWNLINKIF up
+
+EOF
+
+chmod +x $FIREWALLSH
+
+
+# Config DNSMASQ for DNS and DHCP services
+
+if [ -a /etc/dnsmasq.conf ]; then
+	mv /etc/dnsmasq.conf /etc/dnsmasq.conf.bak
+fi
+
+cat <<EOF >/etc/dnsmasq.conf
+conf-dir=/etc/dnsmasq.d
+
+dhcp-authoritative
+dhcp-leasefile=/run/dhcp.lease
+domain-needed
+expand-hosts
+enable-ra
+
+# Serve locally pointed NTP
+dhcp-option=option:ntp-server,0.0.0.0
+
+domain=$SECUREDOMAIN
+domain=$GUESTDOMAIN,$GUESTSUBNET
+
+address=/gw.$SECUREDOMAIN/$LANIP
+
+# Google DNS servers
+server=8.8.8.8
+server=8.8.4.4
+
+#
+# CONFIGURE INTERFACES
+#
+
+no-dhcp-interface=$UPLINK
+
+interface=$LANIF
+dhcp-range=$LANDHCP
+#dhcp-range=1234::,ra-stateless,ra-names
+# OR dhcp-range=1234::,slaac,ra-names
+
+interface=$WIFIIF
+dhcp-range=$WIFIDHCP
+
+interface=$WIFI5IF
+dhcp-range=$WIFI5DHCP
+
+interface=$WIFIGUESTIF
+dhcp-range=$WIFIGUESTDHCP
+
+interface=$WIFIGUEST5IF
+dhcp-range=$WIFIGUEST5DHCP
+EOF
+
+cat <<EOF >/etc/dnsmasq.d/tftp.conf
+enable-tftp
+tftp-root=/home/tftp
+dhcp-boot=trusty-x64/pxelinux.0
 EOF
 
 
