@@ -113,9 +113,8 @@ fi
 cat <<EOF >/etc/ntp.conf
 driftfile /var/lib/ntp/ntp.drift
 statsdir /var/log/ntpstats/
-statistics loopstats peerstats clockstats
+statistics loopstats clockstats
 filegen loopstats file loopstats type day enable
-filegen peerstats file peerstats type day enable
 filegen clockstats file clockstats type day enable
 
 server 0.us.pool.ntp.org iburst
@@ -169,6 +168,8 @@ iptables -A INPUT -i $UPLINKIF -p tcp --dport 53 -j ACCEPT
 iptables -A INPUT -i $UPLINKIF -p udp --dport 53 -j ACCEPT
 # Allow HTTP
 iptables -A INPUT -i $UPLINKIF -p tcp --dport 80 -j ACCEPT
+# Allow NTP
+iptables -A INPUT -i $UPLINKIF -p udp --dport 123 -j ACCEPT
 
 iptables -A INPUT -i $UPLINKIF -p tcp -j DROP
 iptables -A INPUT -i $UPLINKIF -p udp -j DROP
