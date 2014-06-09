@@ -9,42 +9,43 @@
 HOSTURL="`hostname -f`"
 FIREWALLSH="/usr/local/sbin/firewall-$HOSTURL.sh"
 
-SECUREDOMAIN="lan.thelifeofkenneth.com"
-GUESTDOMAIN="guest.thelifeofkenneth.com"
+LANDOMAIN="lan.thelifeofkenneth.com"
 
 UPLINKIF="em1"
 UPLINKBW="100"
 DOWNLINKIF="ifb0"
 DOWNLINKBW="100"
 
-ENTIRESUBNET="10.42.0.0/20"
-SECURESUBNET="10.42.0.0/21"
-GUESTSUBNET="10.42.8.0/21"
+NETID="42"
+# The entire subnet must be a /8, /16, or /24 for the local rDNS
+ENTIRESUBNET="10.$NETID.0.0/16"
+SECURESUBNET="10.$NETID.0.0/21"
+GUESTSUBNET="10.$NETID.8.0/21"
 
-LANIP="10.42.1.1"
-LANNET="10.42.1.0/24"
+LANIP="10.$NETID.1.1"
+LANNET="10.$NETID.1.0/24"
 LANIF="em0"
-LANDHCP="10.42.1.100,10.42.1.199,24h"
+LANDHCP="10.$NETID.1.100,10.$NETID.1.199,24h"
 
-WIFIIP="10.42.2.1"
-WIFINET="10.42.2.0/24"
+WIFIIP="10.$NETID.2.1"
+WIFINET="10.$NETID.2.0/24"
 WIFIIF="$LANIF.2"
-WIFIDHCP="10.42.2.100,10.42.2.199,24h"
+WIFIDHCP="10.$NETID.2.100,10.$NETID.2.199,24h"
 
-WIFI5IP="10.42.3.1"
-WIFI5NET="10.42.3.0/24"
+WIFI5IP="10.$NETID.3.1"
+WIFI5NET="10.$NETID.3.0/24"
 WIFI5IF="$LANIF.3"
-WIFI5DHCP="10.42.3.100,10.42.3.199,24h"
+WIFI5DHCP="10.$NETID.3.100,10.$NETID.3.199,24h"
 
-WIFIGUESTIP="10.42.8.1"
-WIFIGUESTNET="10.42.8.0/24"
+WIFIGUESTIP="10.$NETID.8.1"
+WIFIGUESTNET="10.$NETID.8.0/24"
 WIFIGUESTIF="$LANIF.8"
-WIFIGUESTDHCP="10.42.8.100,10.42.8.199,24h"
+WIFIGUESTDHCP="10.$NETID.8.100,10.$NETID.8.199,24h"
 
-WIFIGUEST5IP="10.42.9.1"
-WIFIGUEST5NET="10.42.9.0/24"
+WIFIGUEST5IP="10.$NETID.9.1"
+WIFIGUEST5NET="10.$NETID.9.0/24"
 WIFIGUEST5IF="$LANIF.9"
-WIFIGUEST5DHCP="10.42.9.100,10.42.9.199,24h"
+WIFIGUEST5DHCP="10.$NETID.9.100,10.$NETID.9.199,24h"
 
 if [[ $EUID -ne 0 ]]; then
    echo "This script must be run as root" 1>&2
@@ -208,16 +209,17 @@ conf-dir=/etc/dnsmasq.d
 dhcp-authoritative
 dhcp-leasefile=/run/dhcp.lease
 domain-needed
+localise-queries
+read-ethers
 expand-hosts
 enable-ra
 
 # Serve locally pointed NTP
 dhcp-option=option:ntp-server,0.0.0.0
 
-domain=$SECUREDOMAIN
-domain=$GUESTDOMAIN,$GUESTSUBNET
+domain=$LANDOMAIN,$ENTIRESUBNET,local
 
-address=/gw.$SECUREDOMAIN/$LANIP
+address=/gw.$LANDOMAIN/$LANIP
 
 # Google DNS servers
 server=8.8.8.8
@@ -226,8 +228,9 @@ server=8.8.4.4
 #
 # CONFIGURE INTERFACES
 #
-
-no-dhcp-interface=$UPLINK
+auth-server=$LANDOMAIN,$UPLINKIF
+interface-name=$LANDOMAIN,$UPLINKIF
+auth-zone=$LANDOMAIN
 
 interface=$LANIF
 dhcp-range=$LANDHCP
