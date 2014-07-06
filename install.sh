@@ -16,7 +16,7 @@ UPLINKBW="100"
 DOWNLINKIF="ifb0"
 DOWNLINKBW="100"
 
-NETID="42"
+NETID="44"
 # The entire subnet must be a /8, /16, or /24 for the local rDNS
 ENTIRESUBNET="10.$NETID.0.0/16"
 SECURESUBNET="10.$NETID.0.0/21"
@@ -47,6 +47,10 @@ WIFIGUEST5NET="10.$NETID.9.0/24"
 WIFIGUEST5IF="$LANIF.9"
 WIFIGUEST5DHCP="10.$NETID.9.100,10.$NETID.9.199,24h"
 
+MESHIP="10.$NETID.10.1"
+MESHIF="wlan0"
+MESHSSID="KWF-mesh"
+
 if [[ $EUID -ne 0 ]]; then
    echo "This script must be run as root" 1>&2
    exit 1
@@ -56,9 +60,15 @@ apt-get update
 apt-get install -y apache2 aptitude atop avahi-daemon avahi-utils \
 	bridge-utils build-essential dnsmasq dstat iperf \
 	lm-sensors minicom mutt nmap ntp pimd postfix \
-	samba screen snmp snmp-mibs-downloader snmpd ssh \
-	vim vlan
+	samba screen snmp snmp-mibs-downloader snmpd squid3 ssh \
+	vim vlan 
 
+# HAVEN'T GOTTEN WORKING YET: miniupnpd miniupnpc minissdpd
+
+# Prevent GRUB from hanging on a bad shutdown
+grep -q "GRUB_RECORDFAIL_TIMEOUT" /etc/default/grub ||
+	echo "GRUB_RECORDFAIL_TIMEOUT=5" >>/etc/default/grub
+update-grub
 
 # Configure network interfaces
 if [ -a /etc/network/interfaces ]; then
@@ -99,6 +109,14 @@ iface $WIFIGUEST5IF inet static
 	address $WIFIGUEST5IP
 	netmask 255.255.255.0
 	vlan-raw-device $LANIF
+
+auto $MESHIF
+iface $MESHIF inet static
+	address $MESHIP
+	netmask 255.255.255.0
+	wireless-channel 11
+	wireless-essid $MESHSSID
+	wireless-mode ad-hoc
 
 # Exterior network interfaces
 auto $UPLINKIF
@@ -156,6 +174,10 @@ iptables -X -t filter
 # NAT rule for IPv4
 iptables -t nat -A POSTROUTING -s $ENTIRESUBNET -o $UPLINKIF -j MASQUERADE
 
+# Mangle rules for transparent proxy
+iptables -t nat -A PREROUTING -s $ENTIRESUBNET -p tcp -m tcp --dport 80 -j DNAT --to-destination $LANIP:3127
+iptables -t nat -A PREROUTING -s $ENTIRESUBNET -p tcp -m tcp --dport 80 -j REDIRECT --to-ports 3127
+
 # Port forwards for internal hosts
 
 # Uplink exceptions and block
@@ -176,9 +198,10 @@ iptables -A INPUT -i $UPLINKIF -p tcp -j DROP
 iptables -A INPUT -i $UPLINKIF -p udp -j DROP
 
 
-# Allow exceptions to DMZ
+# Allow exceptions from DMZ
 iptables -A FORWARD -s $GUESTSUBNET -d $SECURESUBNET -m state \
 			--state ESTABLISHED,RELATED -j ACCEPT
+iptables -A FORWARD -s $GUESTSUBNET -d $SECURESUBNET -p icmp -j ACCEPT
 iptables -A FORWARD -s $GUESTSUBNET -d $SECURESUBNET -p tcp --dport 22 -j ACCEPT
 
 iptables -A FORWARD -s $GUESTSUBNET -d $SECURESUBNET -j DROP
@@ -256,4 +279,8 @@ tftp-root=/home/tftp
 dhcp-boot=trusty-x64/pxelinux.0
 EOF
 
+
+# Configure squid3 proxy for 3128 and 3127 transparent
+
+# Configure OLSR for wlan0 interface
 
