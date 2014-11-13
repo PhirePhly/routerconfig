@@ -35,3 +35,6 @@
 # 0x30 - CS6: IP routing and network control
 # 0x38 - CS7: Interior network control - no DSCP really needed
 
+# 0x04 - TOS routine lowdelay (Used by SSH)
+# 0x02 - TOS routine throughput (used by SCP)
+
